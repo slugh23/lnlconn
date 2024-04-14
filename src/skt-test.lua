@@ -8,7 +8,7 @@ function format_device(...)
   return string.format(fmt, t[1], t[7], t[6], t[5], t[4], t[3], t[2], t[8])
 end
 
--- mercilously stolen from Stack Overflow
+-- shamelessly stolen from Stack Overflow
 local function crc8(t)
   local c = 0
   for _, b in ipairs(t) do
