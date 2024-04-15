@@ -30,6 +30,7 @@ end
 function w1_netlink_msg:pack(payload)
   payload = payload or ""
   self["len"] = #payload
+  print("nl:", self.len)
   va = {}
   for i,v in ipairs(fields) do
     table.insert(va, self[v] or 0)
@@ -39,12 +40,17 @@ end
 
 function w1_netlink_msg:unpack(bytes, pos)
   pos = pos or 1
-  local t = {string.unpack(pack_spec, bytes, pos)}
-  pos = table.remove(t)
-  for i,v in ipairs(fields) do
-    self[v] = t[i]
+  if pos < #bytes then
+    local t = {string.unpack(pack_spec, bytes, pos)}
+    pos = table.remove(t)
+    for i,v in ipairs(fields) do
+      self[v] = t[i]
+    end
+    --print("#bytes, pos", #bytes, pos)
+    self.data = bytes:sub(pos, -1)
+    print("data:", self.data:byte(1,-1))
   end
-  self.data = bytes:sub(pos, -1)
+  print("type, status:", self.type, self.status)
   return pos
 end
 

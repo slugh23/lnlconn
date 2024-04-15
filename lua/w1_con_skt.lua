@@ -38,17 +38,17 @@ function _M:recv()
   local ack = false
   local pkts = {}
   local t, p
-  local hdr = nlmsghdr:new()
-  local msg = cn_msg:new()
-  local w1m = w1_msg:new()
   while not ack do
+    local hdr = nlmsghdr:new()
+    local msg = cn_msg:new()
+    local w1m = w1_msg:new()
     local pkt = self.skt:read()
     -- don't care much about the nlmsghdr.
     p = hdr:unpack(pkt, 0)
     p = msg:unpack(pkt, p)
+    print("seq, ack:", msg.seq, msg.ack)
     p = w1m:unpack(pkt, p)
     table.insert(pkts, w1m)
-    print("seq, ack:", msg.seq, msg.ack)
     if msg.seq > 0 and msg.ack == msg.seq + 1 then
       ack = true
     end
