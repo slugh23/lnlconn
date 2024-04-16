@@ -46,7 +46,7 @@ function _M:recv()
     -- don't care much about the nlmsghdr.
     p = hdr:unpack(pkt, 0)
     p = msg:unpack(pkt, p)
-    print("seq, ack:", msg.seq, msg.ack)
+    --print("seq, ack:", msg.seq, msg.ack)
     p = w1m:unpack(pkt, p)
     table.insert(pkts, w1m)
     if msg.seq > 0 and msg.ack == msg.seq + 1 then

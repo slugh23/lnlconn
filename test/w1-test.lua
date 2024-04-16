@@ -1,16 +1,26 @@
 
 w1 = require("w1"):new()
-w1_cmd = require("w1_netlink_cmd")
+--w1_cmd = require("w1_netlink_cmd")
 
-m = w1:master(1)
-
-ds = m:search()
-
-for _,d in ipairs(ds) do
-  print("found:", ds[1])
-  print(ds[1].id:byte(1,-1))
+---[[
+for _,b in ipairs(w1:bridges()) do
+  print("bridge:", b)
+  for _,d in ipairs(b:search()) do
+    print("device:", d)
+  end
 end
+--]]
 
+--[[
+b2 = w1:bridge(1)
+--ds = m:search()
+for _,d2 in ipairs(b2:search()) do
+  print("bloop")
+  print(d2)
+end
+--]]
+
+--[[
 d = ds[1]
 
 w = w1_cmd:new()
@@ -39,7 +49,7 @@ end
 c = w1_cmd:new()
 c:unpack(ps[#ps].data)
 print(c.data:byte(1,-1))
-
+]]
 --[[
 d:write(string.pack("B", 0xc3))
 ps = d:read(8)

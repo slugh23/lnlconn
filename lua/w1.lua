@@ -44,16 +44,16 @@ function device:__tostring()
   return string.format(fmt, t[1], t[7], t[6], t[5], t[4], t[3], t[2])
 end
 
-local master = {}
+local bridge = {}
 
-function master:new(id, w1)
+function bridge:new(id, w1)
   o = {id=id, w1=w1}
   setmetatable(o, self)
   self.__index = self
   return o
 end
 
-function master:search()
+function bridge:search()
   self.w1:send(
     w1_msg:new{
       type=w1_msg.W1_MASTER_CMD,
@@ -68,12 +68,16 @@ function master:search()
   local pkts = self.w1:recv()
   local cmd = w1_cmd:new()
   cmd:unpack(pkts[1].data)
-  print(cmd.len)
+  --print(cmd.len)
   for i = 1, cmd.len / 8 do
-    d = device:new(string.sub(cmd.data, (i-1)*8 + 1, i*8), self.w1)
+    local d = device:new(string.sub(cmd.data, (i-1)*8 + 1, i*8), self.w1)
     table.insert(devs, d)
   end
   return devs
+end
+
+function bridge:__tostring()
+  return string.format("w1_bus_master%d", self.id)
 end
 
 local w1 = {}
@@ -87,30 +91,30 @@ function w1:new(o)
 end
 
 function w1:send(data)
-  print(">>>")
+  --print(">>>")
   return self.skt:send(data)
 end
 
 function w1:recv()
-  print("<<<")
+  --print("<<<")
   return self.skt:recv()
 end
 
-function w1:master(id)
-  return master:new(id, self)
+function w1:bridge(id)
+  return bridge:new(id, self)
 end
 
-function w1:masters()
+function w1:bridges()
   self.skt:send(w1_msg:new{type=w1_msg.W1_LIST_MASTERS}:pack())
   local pkts = self.skt:recv()
   local d = pkts[1].data
   local p, m = 1, 0
-  local masters = {}
+  local bridges = {}
   while p < #d do
     m, p = string.unpack("I4", d, p)
-    table.insert(masters, self:master(m))
+    table.insert(bridges, self:bridge(m))
   end
-  return masters
+  return bridges
 end
   
 return w1

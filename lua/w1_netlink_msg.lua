@@ -30,7 +30,7 @@ end
 function w1_netlink_msg:pack(payload)
   payload = payload or ""
   self["len"] = #payload
-  print("nl:", self.len)
+  --print("nl:", self.len)
   va = {}
   for i,v in ipairs(fields) do
     table.insert(va, self[v] or 0)
@@ -48,9 +48,9 @@ function w1_netlink_msg:unpack(bytes, pos)
     end
     --print("#bytes, pos", #bytes, pos)
     self.data = bytes:sub(pos, -1)
-    print("data:", self.data:byte(1,-1))
+    --print("data:", self.data:byte(1,-1))
   end
-  print("type, status:", self.type, self.status)
+  --print("type, status:", self.type, self.status)
   return pos
 end
 
