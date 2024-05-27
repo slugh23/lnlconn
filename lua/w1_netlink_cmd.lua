@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MIT
+
 local w1_netlink_cmd = {
 	W1_CMD_READ = 0,
 	W1_CMD_WRITE = 1,
@@ -37,6 +39,13 @@ function w1_netlink_cmd:pack(payload)
     table.insert(va, self[v] or 0)
   end
   return string.pack(pack_spec, table.unpack(va)) .. payload
+end
+
+function w1_netlink_cmd:__concat(payload)
+  if type(payload) == "table" then
+    payload = payload:pack()
+  end
+  return self.pack(payload)
 end
 
 function w1_netlink_cmd:unpack(bytes, pos)

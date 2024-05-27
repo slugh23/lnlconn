@@ -1,4 +1,6 @@
 
+-- SPDX-License-Identifier: MIT
+
 local nl_conn = require("lnlconn")
 local nlmsghdr = require("nlmsghdr")
 local cn_msg = require("cn_msg")

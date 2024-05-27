@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MIT
+
 local w1_netlink_msg = {
 	W1_SLAVE_ADD = 0,
 	W1_SLAVE_REMOVE = 1,
@@ -36,6 +38,13 @@ function w1_netlink_msg:pack(payload)
     table.insert(va, self[v] or 0)
   end
   return string.pack(pack_spec, table.unpack(va)) .. payload
+end
+
+function w1_netlink_msg:__concat(payload)
+  if type(payload) == "table" then
+    payload = payload:pack()
+  end
+  return self.pack(payload)
 end
 
 function w1_netlink_msg:unpack(bytes, pos)

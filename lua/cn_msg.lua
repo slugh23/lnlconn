@@ -1,3 +1,4 @@
+-- SPDX-License-Identifier: MIT
 
 local cn_msg = {}
 
@@ -22,6 +23,13 @@ function cn_msg:pack(payload)
     table.insert(va, self[v] or 0)
   end
   return string.pack(pack_spec, table.unpack(va)) .. payload
+end
+
+function cn_msg:__concat(payload)
+  if type(payload) == "table" then
+    payload = payload:pack()
+  end
+  return self.pack(payload)
 end
 
 function cn_msg:unpack(bytes, pos)

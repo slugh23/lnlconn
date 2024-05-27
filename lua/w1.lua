@@ -1,4 +1,6 @@
 
+-- SPDX-License-Identifier: MIT
+
 local w1_skt = require("w1_con_skt")
 local w1_msg = require("w1_netlink_msg")
 local w1_cmd = require("w1_netlink_cmd")
