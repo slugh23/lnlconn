@@ -29,7 +29,7 @@ function nlmsghdr:__concat(payload)
   if type(payload) == "table" then
     payload = payload:pack()
   end
-  return self.pack(payload)
+  return self:pack(payload)
 end
 
 function nlmsghdr:unpack(bytes)

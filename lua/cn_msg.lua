@@ -29,7 +29,7 @@ function cn_msg:__concat(payload)
   if type(payload) == "table" then
     payload = payload:pack()
   end
-  return self.pack(payload)
+  return self:pack(payload)
 end
 
 function cn_msg:unpack(bytes, pos)

@@ -45,7 +45,7 @@ function w1_netlink_cmd:__concat(payload)
   if type(payload) == "table" then
     payload = payload:pack()
   end
-  return self.pack(payload)
+  return self:pack(payload)
 end
 
 function w1_netlink_cmd:unpack(bytes, pos)
