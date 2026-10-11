@@ -16,6 +16,8 @@ local fields = {
 
 local pack_spec = "BBI2c8"
 
+w1_netlink_msg.size = string.packsize(pack_spec)
+
 function w1_netlink_msg:new(t)
   t = t or {}
   setmetatable(t, self)
@@ -24,15 +26,15 @@ function w1_netlink_msg:new(t)
 end
 
 function w1_netlink_msg.from_pkt(pkt)
-  o = w1_netlink_msg:new()
-  rem = o:unpack(pkt)
+  local o = w1_netlink_msg:new()
+  local rem = o:unpack(pkt)
   return o, rem
 end
 
 function w1_netlink_msg:pack(payload)
   payload = payload or ""
   self["len"] = #payload
-  va = {}
+  local va = {}
   for i,v in ipairs(fields) do
     table.insert(va, self[v] or 0)
   end
@@ -48,13 +50,14 @@ end
 
 function w1_netlink_msg:unpack(bytes, pos)
   pos = pos or 1
-  if pos < #bytes then
+  if pos + w1_netlink_msg.size - 1 <= #bytes then
     local t = {string.unpack(pack_spec, bytes, pos)}
     pos = table.remove(t)
     for i,v in ipairs(fields) do
       self[v] = t[i]
     end
-    self.data = bytes:sub(pos, -1)
+    self.data = bytes:sub(pos, pos + self.len - 1)
+    pos = pos + self.len
   end
   return pos
 end

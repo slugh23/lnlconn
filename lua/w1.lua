@@ -8,7 +8,7 @@ local w1_cmd = require("w1_netlink_cmd")
 local device = {}
 
 function device:new(id, w1)
-  o = {id=id, w1=w1}
+  local o = {id=id, w1=w1}
   setmetatable(o, self)
   self.__index = self
   return o
@@ -49,7 +49,7 @@ end
 local bridge = {}
 
 function bridge:new(id, w1)
-  o = {id=id, w1=w1}
+  local o = {id=id, w1=w1}
   setmetatable(o, self)
   self.__index = self
   return o
@@ -67,7 +67,10 @@ function bridge:search()
     )
   )
   local devs = {}
-  local pkts = self.w1:recv()
+  local pkts, err, errno = self.w1:recv()
+  if not pkts or not pkts[1] then
+    return nil, err or "no reply", errno
+  end
   local cmd = w1_cmd:new()
   cmd:unpack(pkts[1].data)
   --print(cmd.len)
@@ -108,7 +111,10 @@ end
 
 function w1:bridges()
   self.skt:send(w1_msg:new{type=w1_msg.W1_LIST_MASTERS}:pack())
-  local pkts = self.skt:recv()
+  local pkts, err, errno = self.skt:recv()
+  if not pkts or not pkts[1] then
+    return nil, err or "no reply", errno
+  end
   local d = pkts[1].data
   local p, m = 1, 0
   local bridges = {}

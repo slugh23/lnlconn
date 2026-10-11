@@ -8,6 +8,8 @@ local fields = {
 
 local pack_spec = "I4I4I4I4I2I2"
 
+cn_msg.size = string.packsize(pack_spec)
+
 function cn_msg:new(t)
   t = t or {}
   setmetatable(t, self)
@@ -18,7 +20,7 @@ end
 function cn_msg:pack(payload)
   payload = payload or ""
   self["len"] = #payload
-  va = {}
+  local va = {}
   for i,v in ipairs(fields) do
     table.insert(va, self[v] or 0)
   end

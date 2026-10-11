@@ -8,6 +8,8 @@ local fields = {
 
 local pack_spec = "I4I2I2I4I4"
 
+nlmsghdr.size = string.packsize(pack_spec)
+
 function nlmsghdr:new(t)
   t = t or {}
   setmetatable(t, self)
@@ -32,8 +34,9 @@ function nlmsghdr:__concat(payload)
   return self:pack(payload)
 end
 
-function nlmsghdr:unpack(bytes)
-  local t = {string.unpack(pack_spec, bytes)}
+function nlmsghdr:unpack(bytes, pos)
+  pos = pos or 1
+  local t = {string.unpack(pack_spec, bytes, pos)}
   local remaining = table.remove(t)
   for i,v in ipairs(fields) do
     self[v] = t[i]

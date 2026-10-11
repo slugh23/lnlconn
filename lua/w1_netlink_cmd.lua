@@ -18,6 +18,8 @@ local fields = {
 
 local pack_spec = "BBI2"
 
+w1_netlink_cmd.size = string.packsize(pack_spec)
+
 function w1_netlink_cmd:new(t)
   t = t or {}
   setmetatable(t, self)
@@ -26,15 +28,15 @@ function w1_netlink_cmd:new(t)
 end
 
 function w1_netlink_cmd.from_pkt(pkt)
-  o = w1_netlink_cmd:new()
-  rem = o:unpack(pkt)
+  local o = w1_netlink_cmd:new()
+  local rem = o:unpack(pkt)
   return o, rem
 end
 
 function w1_netlink_cmd:pack(payload)
   payload = payload or ""
   self["len"] = #payload
-  va = {}
+  local va = {}
   for i,v in ipairs(fields) do
     table.insert(va, self[v] or 0)
   end
@@ -55,8 +57,8 @@ function w1_netlink_cmd:unpack(bytes, pos)
   for i,v in ipairs(fields) do
     self[v] = t[i]
   end
-  self.data = bytes:sub(pos, -1)
-  return pos
+  self.data = bytes:sub(pos, pos + self.len - 1)
+  return pos + self.len
 end
 
 return w1_netlink_cmd
