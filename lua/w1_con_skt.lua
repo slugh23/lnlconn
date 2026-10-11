@@ -46,7 +46,7 @@ function _M:recv()
     local w1m = w1_msg:new()
     local pkt = self.skt:read()
     -- don't care much about the nlmsghdr.
-    p = hdr:unpack(pkt, 0)
+    p = hdr:unpack(pkt)
     p = msg:unpack(pkt, p)
     --print("seq, ack:", msg.seq, msg.ack)
     p = w1m:unpack(pkt, p)
