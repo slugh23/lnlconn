@@ -94,7 +94,7 @@ static int init(lua_State *L)
         if(lua_type(L, -1) != LUA_TNIL) {
             l_local.nl_groups = lua_tointegerx(L, -1, &isnum);
             if (!isnum) {
-                l_local.nl_groups = -1;
+                return luaL_argerror(L, 1, "groups must be an integer");
             }
         }
         lua_pop(L, 1);
@@ -104,7 +104,7 @@ static int init(lua_State *L)
         if(lua_type(L, -1) != LUA_TNIL) {
             l_local.nl_pid = lua_tointegerx(L, -1, &isnum);
             if (!isnum) {
-                l_local.nl_groups = 0;
+                return luaL_argerror(L, 1, "pid must be an integer");
             }
         }
         lua_pop(L, 1);

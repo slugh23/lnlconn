@@ -88,7 +88,7 @@ function w1:new(o)
   o = o or {}
   setmetatable(o, self)
   self.__index = self
-  o.skt = w1_skt:create(o.groups, o.pid)
+  o.skt = w1_skt:create{groups=o.groups, pid=o.pid}
   return o
 end
 
