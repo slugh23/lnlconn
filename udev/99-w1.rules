@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MIT
+#
+# Let members of the "w1" group use the 1-Wire sysfs interface (bus masters,
+# slave devices and their attributes, e.g. the "eeprom" file of a DS2431).
+#
+# Setup:
+#   sudo groupadd --system w1
+#   sudo usermod -aG w1 $USER        # log out and back in afterwards
+#   sudo cp udev/99-w1.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=w1
+#
+# Some slave attributes (such as "eeprom") are created by the family driver
+# just after the device's "add" event, so the short sleep gives them time to
+# appear before the permissions are applied.
+#
+# This does not affect the netlink connector used by lnlconn; that still needs
+# the privileges the kernel requires for NETLINK_CONNECTOR.
+SUBSYSTEM=="w1", ACTION=="add|change", RUN+="/bin/sh -c 'sleep 1; chgrp -R w1 /sys%p && chmod -R g=u /sys%p'"
