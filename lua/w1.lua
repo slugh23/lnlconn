@@ -71,6 +71,9 @@ function bridge:search()
   if not pkts or not pkts[1] then
     return nil, err or "no reply", errno
   end
+  if pkts[1].status ~= 0 then
+    return nil, "w1 error", pkts[1].status
+  end
   local cmd = w1_cmd:new()
   cmd:unpack(pkts[1].data)
   --print(cmd.len)
@@ -114,6 +117,9 @@ function w1:bridges()
   local pkts, err, errno = self.skt:recv()
   if not pkts or not pkts[1] then
     return nil, err or "no reply", errno
+  end
+  if pkts[1].status ~= 0 then
+    return nil, "w1 error", pkts[1].status
   end
   local d = pkts[1].data
   local p, m = 1, 0
