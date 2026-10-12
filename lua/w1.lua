@@ -15,7 +15,6 @@ function device:new(id, w1)
 end
 
 function device:cmd(bytes)
-  print(">bytes:", #bytes)
   self.w1:send(
     w1_msg:new{
       type=w1_msg.W1_SLAVE_CMD,
