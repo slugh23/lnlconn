@@ -118,9 +118,10 @@ issues a `W1_CMD_READ` of `n` bytes.  Both return the list of reply messages.
 ### Reading and writing EEPROM memory
 
 Devices found by `bridge:search()` have memory helpers for the DS2431 (family
-`0x2d`, 128 bytes), the DS2430A (family `0x14`, 32 bytes) and, read only, the
-DS2433 (family `0x23`, 512 bytes).  They go straight to the device over netlink, so there is no sysfs path
-to look up.  Other families return `nil, "unsupported device family"`.
+`0x2d`, 128 bytes), the DS2430A (family `0x14`, 32 bytes) and the DS2433
+(family `0x23`, 512 bytes).  They go straight to the device over netlink, so
+there is no sysfs path to look up.  Other families return
+`nil, "unsupported device family"`.
 
 ```lua
 local data = dev:read_memory(0, 56)           -- addr, number of bytes
@@ -130,16 +131,29 @@ local ok, err = dev:write_memory(0x10, "abc") -- any address and alignment
 - `dev:read_memory(addr, n [, proof])` returns a string.  The DS2431's read
   command has no CRC, so `proof=true` reads again until two reads agree, at
   twice the cost.
-- `dev:write_memory(addr, data)` returns `true`.  Writing the same data does
-  nothing, and the result is always read back and verified.  The DS2431 is
-  programmed one 8-byte row at a time, and only rows that change (scratchpad
-  write, read-back, copy, then an 11 ms wait).  The DS2430A copies its whole
-  32-byte scratchpad in one step, so the merged contents are loaded and
-  copied once.  Its datasheet asks for a pull-up of 2.2 k&Omega; at 4 V or
-  more when writing.
+- `dev:write_memory(addr, data [, opts])` returns `true`.  Writing the same
+  data does nothing, and the result is read back and verified.  Each family
+  programs differently:
+  - The DS2431 is programmed one 8-byte row at a time, and only rows that
+    change (scratchpad write, read-back, copy, then an 11 ms wait).
+  - The DS2430A copies its whole 32-byte scratchpad in one step, so the merged
+    contents are loaded and copied once.  Its datasheet asks for a pull-up of
+    2.2 k&Omega; at 4 V or more when writing.
+  - The DS2433 has 32-byte pages and copies only the bytes loaded, so there is
+    no read-modify-write.  A write is split at page boundaries and trimmed to
+    the bytes that change, then waits 6 ms per page.  That covers the
+    DS24B33A's 6 ms programming time (5 ms for the DS2433 and DS24B33); they
+    share family code `0x23`, so the code can't tell them apart.  Programming
+    draws about 2 mA from the bus, which must stay above 2.8 V while it runs.
+- `opts.verify = false` skips the final read-back (the scratchpad is still
+  checked before it is copied), and `opts.compare = false` skips the DS2433's
+  pre-read so the data is always programmed.  Both trade safety for speed.
+  Without the read-back nothing confirms that the copy completed; the
+  DS24B33 datasheet recommends reading the page back after every copy.
 - Addresses outside the data memory are refused before anything is sent, so
   the permanent registers can't be reached: the DS2431's protection bytes
-  (`0x80` and up) and the DS2430A's one-time application register.
+  (`0x80` and up) and the DS2430A's one-time application register.  The
+  DS2433's write-protect and EPROM-mode registers are not addressable either.
 - On failure they return `nil, message [, status]`, where `status` is the
   kernel's errno for the request.
 
@@ -148,7 +162,8 @@ about 72 ms (144 ms with `proof`), a 56-byte read about 35 ms, and a write
 takes roughly 37 ms per changed row plus the verifying reads.  A 32-byte
 DS2430A read is about 22 ms (44 ms with `proof`), about twice as fast as the
 kernel's sysfs read.  A DS2430A write takes about 150 ms, of which roughly
-60 ms is programming and the rest the double reads before and after.
+60 ms is programming and the rest the double reads before and after.  A
+512-byte DS2433 read is about 275 ms (550 ms with `proof`).
 
 `test/w1-memory-sim-test.lua` exercises all of this against simulated devices
 and needs no hardware.
@@ -156,8 +171,8 @@ and needs no hardware.
 ### TEDS images
 
 TEDS memories keep a two's complement checksum in byte 0 of every 32-byte page.
-For the DS2431 and DS2430A the device adds and removes these for you, so a
-decoder or encoder only sees the TEDS bytes:
+For the DS2431, DS2430A and DS2433 the device adds and removes these for you,
+so a decoder or encoder only sees the TEDS bytes:
 
 ```lua
 local teds, info = dev:read_teds()      -- checksums verified and removed
@@ -171,10 +186,11 @@ assert(dev:write_teds(new_teds))        -- checksums added again
   total), and the register is included in the page's checksum.  An unlocked
   DS2430A gives 31 bytes.  A bad checksum returns `nil, "checksum mismatch in
   page N"` (pages count from 0); `opts.verify = false` returns the bytes
-  anyway, and `opts.proof = true` reads twice.
-- `dev:write_teds(payload)` pads a short payload with zeros, rejects one that
-  is too long, and writes through `write_memory`, so unchanged pages are not
-  reprogrammed.  When the application register is locked, the payload must
+  anyway, and `opts.proof = true` reads twice.  A DS2433 gives 496 bytes
+  (16 pages of 31).
+- `dev:write_teds(payload [, opts])` pads a short payload with zeros, rejects
+  one that is too long, and writes through `write_memory` (`opts` is passed
+  on), so unchanged pages are not reprogrammed.  When the application register is locked, the payload must
   start with its 8 bytes, which are never written.
 - On a DS2430A with a locked application register, the register is part of
   the page checksum.  This was checked against a DS2430A holding valid TEDS:

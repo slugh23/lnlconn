@@ -24,6 +24,8 @@ local function make_sim(family, size, opts)
   sim.app = opts.app or string.rep("\0", 8)
   local replies = {}
   local scratch_ta, scratch_data, es -- DS2431
+  local pg_ta, pg_data               -- DS2433
+  sim.copied_bytes = 0
   local pad = {}                     -- DS2430A
   for i = 0, 31 do pad[i] = 0 end
 
@@ -55,6 +57,21 @@ local function make_sim(family, size, opts)
         sim.programmed = sim.programmed + 1
       elseif op == 0x99 or op == 0x5A then
         sim.protected_touched = true -- would write or lock the register
+      end
+    elseif family == 0x23 then
+      if op == 0x0F and #tx >= 4 then
+        pg_ta, pg_data = tx:sub(2, 3), tx:sub(4)
+        assert(#pg_data <= 32 - string.unpack("<I2", pg_ta) % 32, "scratchpad write crosses a page")
+        if sim.corrupt_scratch > 0 then
+          sim.corrupt_scratch = sim.corrupt_scratch - 1
+          pg_data = string.char((pg_data:byte(1) + 1) % 256) .. pg_data:sub(2)
+        end
+      elseif op == 0x55 and #tx == 4 then
+        local a = string.unpack("<I2", pg_ta)
+        assert(tx:sub(2, 3) == pg_ta and tx:byte(4) == (a + #pg_data - 1) & 0x1f, "bad copy")
+        for i = 1, #pg_data do sim.mem[a + i - 1] = pg_data:byte(i) end
+        sim.programmed = sim.programmed + 1
+        sim.copied_bytes = sim.copied_bytes + #pg_data
       end
     elseif family == 0x2d then
       if op == 0x0F and #tx == 11 then
@@ -95,6 +112,9 @@ local function make_sim(family, size, opts)
       out = mem_str(string.unpack("<I2", tx, 2), n)
     elseif op == 0xAA and family == 0x2d then
       out = scratch_ta .. es .. scratch_data
+    elseif op == 0xAA and family == 0x23 then
+      local a = string.unpack("<I2", pg_ta)
+      out = pg_ta .. string.char((a + #pg_data - 1) & 0x1f) .. pg_data
     end
     if op == 0xF0 and sim.corrupt_reads > 0 then
       sim.corrupt_reads = sim.corrupt_reads - 1
@@ -226,12 +246,73 @@ do
   eq(sim.programmed, 0, "failed write programs nothing")
 end
 
--- ---- DS2433: readable, not writable ----
+-- ---- DS2433: 512 bytes, 32-byte pages, partial-page writes ----
 do
-  local dev = make_device(0x23, 512)
-  eq(#dev:read_memory(0, 512), 512, "ds2433 read")
-  local ok, err = dev:write_memory(0, "x")
-  expect_error(ok, err, "writing not supported for this device", "ds2433 write")
+  local dev, sim = make_device(0x23, 512)
+  local orig = snapshot(sim, 512)
+
+  eq(#dev:read_memory(0, 512), 512, "ds2433 full read")
+  eq(dev:read_memory(30, 6), sim:memstr():sub(31, 36), "read across a page")
+
+  assert(dev:write_memory(5, "abcd"))
+  eq(sim.programmed, 1, "partial page is one copy")
+  eq(sim.copied_bytes, 4, "only the four bytes are copied")
+  eq(sim:memstr():sub(6, 9), "abcd", "data")
+  eq(sim:memstr():sub(1, 5), orig(0, 4), "bytes before untouched")
+  eq(sim:memstr():sub(10, 32), orig(9, 31), "rest of the page untouched")
+
+  sim.programmed, sim.copied_bytes = 0, 0
+  assert(dev:write_memory(30, "123456"))
+  eq(sim.programmed, 2, "a write across a page boundary is two copies")
+  eq(sim.copied_bytes, 6, "six bytes copied")
+  eq(sim:memstr():sub(31, 36), "123456", "data across the boundary")
+
+  sim.programmed = 0
+  assert(dev:write_memory(30, "123456"))
+  eq(sim.programmed, 0, "identical data programs nothing")
+
+  sim.programmed, sim.copied_bytes = 0, 0
+  assert(dev:write_memory(30, "12X456"))
+  eq(sim.programmed, 1, "one changed byte is one copy")
+  eq(sim.copied_bytes, 1, "only that byte is copied")
+  eq(sim:memstr():sub(31, 36), "12X456", "single byte change")
+
+  local big = string.rep("0123456789abcdef", 32)
+  sim.programmed = 0
+  assert(dev:write_memory(0, big))
+  eq(sim:memstr(), big, "whole memory"); eq(sim.programmed, 16, "16 pages")
+
+  -- options: skipping the pre-read and the final read-back
+  local r0 = sim.requests
+  assert(dev:write_memory(100, "zz", {compare = false, verify = false}))
+  eq(sim.requests - r0, 3, "load, check and copy only")
+  eq(sim:memstr():sub(101, 102), "zz", "data")
+  sim.programmed = 0
+  assert(dev:write_memory(100, "zz", {compare = false, verify = false}))
+  eq(sim.programmed, 1, "compare=false programs unchanged data")
+  r0 = sim.requests
+  assert(dev:write_memory(100, "yy", {verify = false}))
+  eq(sim.requests - r0, 5, "pre-read (2) + load, check, copy")
+  r0 = sim.requests
+  assert(dev:write_memory(100, "xx"))
+  eq(sim.requests - r0, 7, "pre-read (2) + load, check, copy + verify (2)")
+
+  sim.programmed, sim.corrupt_scratch = 0, 1
+  assert(dev:write_memory(200, "retry"))
+  eq(sim.programmed, 1, "retry copies once"); eq(sim:memstr():sub(201, 205), "retry", "retry data")
+
+  sim.programmed, sim.corrupt_scratch = 0, 99
+  local ok, err = dev:write_memory(300, "fail")
+  expect_error(ok, err, "scratchpad verify failed", "persistent failure")
+  eq(sim.programmed, 0, "failed write copies nothing")
+  sim.corrupt_scratch = 0
+
+  local before = sim.requests
+  for _, c in ipairs{{511, "xy"}, {512, "x"}, {-1, "x"}, {0, ""}} do
+    local ok2, err2 = dev:write_memory(c[1], c[2])
+    expect_error(ok2, err2, "address out of range", "range")
+  end
+  eq(sim.requests, before, "range errors send nothing")
 end
 
 -- ---- DS2430A: 32 bytes, 1-byte addresses, whole-scratchpad copy ----
@@ -279,6 +360,18 @@ do
   sim.corrupt_reads = 1
   eq(dev:read_memory(0, 32, true), sim:memstr(), "proof read recovers")
   eq(sim.protected_touched, false, "application register never touched")
+end
+
+-- ---- verify=false skips the final read-back on every family ----
+for _, c in ipairs{{0x2d, 128, 0x40}, {0x14, 32, 4}, {0x23, 512, 0x40}} do
+  local dev, sim = make_device(c[1], c[2])
+  local r0 = sim.requests
+  assert(dev:write_memory(c[3], "A"))
+  local with = sim.requests - r0
+  r0 = sim.requests
+  assert(dev:write_memory(c[3], "B", {verify = false}))
+  eq(with - (sim.requests - r0), 2, string.format("family %02x: the read-back is two requests", c[1]))
+  eq(sim:memstr():sub(c[3] + 1, c[3] + 1), "B", "verify=false still writes")
 end
 
 -- ---- TEDS: checksums added and removed by the device ----
@@ -365,12 +458,35 @@ do -- a real DS2430A holding valid TEDS: the register is part of the checksum
   assert(dev:write_teds(got)); eq(sim.programmed, 0, "rewriting valid TEDS programs nothing")
 end
 
+do -- DS2433: sixteen pages, 31 payload bytes each
+  local dev, sim = make_device(0x23, 512)
+  local payload = string.rep("0123456789", 49) .. "ABCDEF" -- 496 bytes
+  eq(#payload, 496, "payload size")
+  assert(dev:write_teds(payload, {verify = false}))
+  local mem = sim:memstr()
+  for p = 0, 15 do
+    local page = mem:sub(p * 32 + 1, p * 32 + 32)
+    eq(page:byte(1), checksum(page:sub(2)), "ds2433 page " .. p .. " checksum")
+  end
+  local got, info = dev:read_teds()
+  eq(got, payload, "ds2433 round trip"); eq(info.pages, 16, "pages"); eq(info.application, false, "no application")
+  sim.programmed = 0
+  assert(dev:write_teds(payload)); eq(sim.programmed, 0, "unchanged TEDS programs nothing")
+  assert(dev:write_teds("short"))
+  eq(dev:read_teds(), "short" .. string.rep("\0", 496 - 5), "short payload zero padded")
+  local ok0, err0 = dev:write_teds(string.rep("x", 497))
+  expect_error(ok0, err0, "payload too long (496 bytes at most)", "too long")
+  sim.mem[7 * 32 + 9] = (sim.mem[7 * 32 + 9] + 1) % 256
+  local ok1, err1 = dev:read_teds()
+  expect_error(ok1, err1, "checksum mismatch in page 7", "corruption detected")
+end
+
 do -- families without TEDS support
-  local dev = make_device(0x23, 512)
+  local dev = make_device(0x28, 8)
   local ok, err = dev:read_teds()
-  expect_error(ok, err, "unsupported device family", "ds2433 teds")
+  expect_error(ok, err, "unsupported device family", "unknown family teds")
   local ok2, err2 = dev:write_teds("x")
-  expect_error(ok2, err2, "unsupported device family", "ds2433 write teds")
+  expect_error(ok2, err2, "unsupported device family", "unknown family write teds")
 end
 
 -- ---- unknown family ----

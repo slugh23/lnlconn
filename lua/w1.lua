@@ -44,7 +44,10 @@ end
 -- (0x80 and up) and the DS2430A's application register are permanent once
 -- written, so they are out of range here.  "writer" is set below.
 local memory = {
-  [0x23] = {size = 512, abytes = 2},                           -- DS2433, read only
+  -- DS2433 and DS24B33/DS24B33A share the family code; tPROG is at most 5 ms
+  -- (6 ms for the DS24B33A), so wait 6 ms.
+  [0x23] = {size = 512, abytes = 2, page = 32, tprog = 6, writable = true,
+            teds = true},
   [0x2d] = {size = 128, abytes = 2, row = 8, writable = true, teds = true}, -- DS2431
   [0x14] = {size = 32, abytes = 1, writable = true, teds = true,
             has_app = true},                                   -- DS2430A
@@ -171,7 +174,7 @@ local function write_row(dev, addr, row)
 end
 
 -- DS2431: only the 8-byte rows that actually change are programmed.
-local function write_ds2431(self, info, addr, data)
+local function write_ds2431(self, info, addr, data, opts)
   local first, last = addr // info.row, (addr + #data - 1) // info.row
   local base = first * info.row
   local span = (last - first + 1) * info.row
@@ -192,6 +195,9 @@ local function write_ds2431(self, info, addr, data)
       end
     end
   end
+  if opts.verify == false then
+    return true
+  end
   local back
   back, err, status = self:read_memory(base, span, true)
   if not back then
@@ -205,7 +211,7 @@ end
 
 -- DS2430A: COPY SCRATCHPAD always copies the whole 32-byte scratchpad, so the
 -- merged image is loaded in full and copied once, and only if it changed.
-local function write_ds2430a(self, info, addr, data)
+local function write_ds2430a(self, info, addr, data, opts)
   local cur, err, status = self:read_memory(0, info.size, true)
   if not cur then
     return nil, err, status
@@ -246,6 +252,9 @@ local function write_ds2430a(self, info, addr, data)
   if not copied then
     return nil, "scratchpad verify failed"
   end
+  if opts.verify == false then
+    return true
+  end
   local back
   back, err, status = self:read_memory(0, info.size, true)
   if not back then
@@ -257,12 +266,96 @@ local function write_ds2430a(self, info, addr, data)
   return true
 end
 
+-- DS2433: 32-byte pages.  COPY SCRATCHPAD copies just the bytes that were
+-- loaded (target address to end offset, within one page), so no read-modify-
+-- write is needed.  Each page is written separately and trimmed to the
+-- bytes that actually change.
+local function write_chunk(dev, info, addr, bytes)
+  local ta = string.pack("<I2", addr)
+  local es = string.char((addr + #bytes - 1) & 0x1f)
+  local load = write_cmd("\x0F" .. ta .. bytes)
+  local check = write_cmd("\xAA") .. read_cmd(#bytes + 3)
+  local copy = write_cmd("\x55" .. ta .. es)
+  for _ = 1, 3 do
+    local pkts, err, status = transact(dev, load)
+    if not pkts then
+      return nil, err, status
+    end
+    pkts, err, status = transact(dev, check)
+    if not pkts then
+      return nil, err, status
+    end
+    local got
+    got, err = read_data(pkts, #bytes + 3)
+    if not got then
+      return nil, err
+    end
+    if got == ta .. es .. bytes then
+      pkts, err, status = transact(dev, copy)
+      if not pkts then
+        return nil, err, status
+      end
+      msleep(info.tprog)
+      return true
+    end
+  end
+  return nil, "scratchpad verify failed"
+end
+
+local function write_ds2433(self, info, addr, data, opts)
+  local cur
+  if opts.compare ~= false then
+    local err, status
+    cur, err, status = self:read_memory(addr, #data, true)
+    if not cur then
+      return nil, err, status
+    end
+  end
+  local pos = 1
+  while pos <= #data do
+    local a = addr + pos - 1
+    local len = math.min(#data - pos + 1, info.page - a % info.page)
+    local first, last = 1, len
+    if cur then
+      local want, have = data:sub(pos, pos + len - 1), cur:sub(pos, pos + len - 1)
+      while first <= len and want:byte(first) == have:byte(first) do
+        first = first + 1
+      end
+      while last >= first and want:byte(last) == have:byte(last) do
+        last = last - 1
+      end
+    end
+    if first <= last then
+      local ok, err, status =
+        write_chunk(self, info, a + first - 1, data:sub(pos + first - 1, pos + last - 1))
+      if not ok then
+        return nil, err, status
+      end
+    end
+    pos = pos + len
+  end
+  if opts.verify ~= false then
+    local back, err, status = self:read_memory(addr, #data, true)
+    if not back then
+      return nil, err, status
+    end
+    if back ~= data then
+      return nil, "verify failed"
+    end
+  end
+  return true
+end
+
+memory[0x23].writer = write_ds2433
 memory[0x2d].writer = write_ds2431
 memory[0x14].writer = write_ds2430a
 
 -- Writes data at addr (any alignment) and verifies the result by reading it
--- back.  Only data that actually changes is programmed.
-function device:write_memory(addr, data)
+-- back.  Only data that actually changes is programmed.  Options:
+--   verify=false   skip the final read-back (the scratchpad is still checked)
+--   compare=false  DS2433 only: skip the pre-read and always program the data
+-- Both trade safety for speed.
+function device:write_memory(addr, data, opts)
   local info = memory_info(self)
   if not info or not info.writable then
     return nil, "writing not supported for this device"
@@ -270,7 +363,7 @@ function device:write_memory(addr, data)
   if addr < 0 or #data < 1 or addr + #data > info.size then
     return nil, "address out of range"
   end
-  return info.writer(self, info, addr, data)
+  return info.writer(self, info, addr, data, opts or {})
 end
 
 -- DS2430A application register: 64 bits, one-time programmable.  Only
@@ -365,7 +458,7 @@ end
 -- payloads are padded with zeros.  On a DS2430A with a locked application
 -- register the payload must start with the register's 8 bytes, which are
 -- never written.
-function device:write_teds(payload)
+function device:write_teds(payload, opts)
   local info = memory_info(self)
   if not info or not info.teds then
     return nil, "unsupported device family"
@@ -398,7 +491,7 @@ function device:write_teds(payload)
     local chunk = body:sub(p * (TEDS_PAGE - 1) + 1, (p + 1) * (TEDS_PAGE - 1))
     parts[#parts + 1] = string.char(checksum((p == 0 and app or "") .. chunk)) .. chunk
   end
-  return self:write_memory(0, table.concat(parts))
+  return self:write_memory(0, table.concat(parts), opts)
 end
 
 function device:__tostring()
