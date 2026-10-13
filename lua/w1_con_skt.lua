@@ -25,6 +25,9 @@ function _M:create(t)
     },
     skt = nl_conn.create{groups=t.groups, pid=t.pid}
   }
+  if o.skt and t.timeout then
+    o.skt:settimeout(t.timeout)
+  end
   setmetatable(o, self)
   self.__index = self
   return o
@@ -72,6 +75,7 @@ end
 -- request.
 function _M:recv()
   local pending = self.pending
+  self.pending = nil -- consumed whether recv() succeeds, fails or times out
   if not pending or #pending == 0 then
     return nil, "no request pending"
   end

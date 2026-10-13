@@ -46,11 +46,14 @@ Returns a handle, or `nil, message, errno` on failure.
 | Method            | Description                                               |
 |-------------------|-----------------------------------------------------------|
 | `h:write(bytes)`  | Sends a string; returns bytes sent.                       |
+| `h:settimeout(s)` | Limits how long each `read` may wait, in seconds (fractions allowed, `0` polls). `nil` or a negative value waits forever, which is the default. |
 | `h:read()`        | Blocking receive of one datagram (max 4096 bytes); returns a string. |
 | `h:fileno()`      | Returns the file descriptor (alias `h:getfd()`), e.g. for `select`-style loops. |
 | `h:close()`       | Closes the socket.  Also done on garbage collection.      |
 
-`read` and `write` return `nil, message, errno` on error.
+`read` and `write` return `nil, message, errno` on error.  A `read` that times
+out returns `nil, "Connection timed out", 110` (`ETIMEDOUT`).  The timeout
+applies to each `read` call, not to a series of them.
 
 ### Constants
 
@@ -91,7 +94,7 @@ Modules for the Linux `w1` netlink protocol (see
 |-------------------|------------------------------------------------------------|
 | `w1_netlink_msg`  | `w1_netlink_msg` header (`type`, `status`, `len`, `union`) and `W1_*` message types (`W1_LIST_MASTERS`, `W1_MASTER_CMD`, `W1_SLAVE_CMD`, ...). |
 | `w1_netlink_cmd`  | `w1_netlink_cmd` header (`cmd`, `res`, `len`) and `W1_CMD_*` commands (`W1_CMD_READ`, `W1_CMD_WRITE`, `W1_CMD_SEARCH`, `W1_CMD_RESET`, ...). |
-| `w1_con_skt`      | Wraps an `lnlconn` socket: `create{groups=, pid=}`, `send(payload)` adds the `nlmsghdr` and `cn_msg` headers and a sequence number, `recv()` reads until the ack and returns a list of `w1_netlink_msg` objects. |
+| `w1_con_skt`      | Wraps an `lnlconn` socket: `create{groups=, pid=, timeout=}` (`timeout` as for `settimeout`), `send(payload)` adds the `nlmsghdr` and `cn_msg` headers and a sequence number, `recv()` reads until the last reply to the request and returns a list of `w1_netlink_msg` objects, or `nil, message, errno` (including a timeout). Replies to earlier requests are skipped. |
 | `w1`              | High-level API: bridges (bus masters) and devices. |
 
 ### High-level usage

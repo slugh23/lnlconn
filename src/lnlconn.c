@@ -29,6 +29,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <poll.h>
+#include <time.h>
 
 #include <sys/socket.h>
 #include <linux/rtnetlink.h>
@@ -39,6 +41,7 @@
 #define MT_NAME "NLCONN_HANDLE"
 #define READ_BUFFER_SIZE 4096
 #define INVALID_FD (-1)
+#define MAX_TIMEOUT_S 2000000.0
 
 enum w1_cn_msg_flags {
 	W1_CN_BUNDLE = 1,
@@ -49,6 +52,7 @@ enum w1_cn_msg_flags {
 struct nlconn_context {
     int fd;
     uint32_t seq;
+    int timeout_ms;     /* read timeout; negative blocks indefinitely */
 };
 
 void push_nlconn_handle(lua_State *L, int fd)
@@ -58,6 +62,7 @@ void push_nlconn_handle(lua_State *L, int fd)
     ctx = (struct nlconn_context*) lua_newuserdata(L, sizeof(struct nlconn_context));
     ctx->fd = fd;
     ctx->seq = 0;
+    ctx->timeout_ms = -1;
     luaL_getmetatable(L, MT_NAME);
     lua_setmetatable(L, -2);
 }
@@ -130,6 +135,35 @@ static int handle_fileno(lua_State *L)
     return 1;
 }
 
+/* Waits until fd is readable.  Returns 0, or -1 with errno set (ETIMEDOUT
+ * if timeout_ms elapsed).  Interrupted waits resume with the time left. */
+static int wait_readable(int fd, int timeout_ms)
+{
+    struct pollfd pfd = {fd, POLLIN, 0};
+    struct timespec start, now;
+    int remaining = timeout_ms;
+    int r;
+
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    for (;;) {
+        r = poll(&pfd, 1, remaining);
+        if (r > 0) {
+            return 0;
+        }
+        if (r == 0) {
+            errno = ETIMEDOUT;
+            return -1;
+        }
+        if (errno != EINTR) {
+            return -1;
+        }
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long elapsed = (long)(now.tv_sec - start.tv_sec) * 1000
+                     + (now.tv_nsec - start.tv_nsec) / 1000000;
+        remaining = elapsed >= timeout_ms ? 0 : timeout_ms - (int)elapsed;
+    }
+}
+
 static int handle_read(lua_State *L)
 {
     struct nlconn_context* ctx = NULL;
@@ -138,6 +172,9 @@ static int handle_read(lua_State *L)
 
     ctx = (struct nlconn_context*) luaL_checkudata(L, 1, MT_NAME);
     if (ctx && ctx->fd != INVALID_FD) {
+        if (ctx->timeout_ms >= 0 && wait_readable(ctx->fd, ctx->timeout_ms) == -1) {
+            return handle_error(L);
+        }
         len = recv(ctx->fd, buffer, READ_BUFFER_SIZE, 0);
         if (len < 0) {
             return handle_error(L);
@@ -146,6 +183,34 @@ static int handle_read(lua_State *L)
         return 1;
     }
     return 0;
+}
+
+static int handle_settimeout(lua_State *L)
+{
+    struct nlconn_context* ctx = NULL;
+    lua_Number t;
+    int ms;
+
+    ctx = (struct nlconn_context*) luaL_checkudata(L, 1, MT_NAME);
+    if (lua_isnoneornil(L, 2)) {
+        ctx->timeout_ms = -1;
+    } else {
+        t = luaL_checknumber(L, 2);
+        if (t < 0) {
+            ctx->timeout_ms = -1;
+        } else {
+            if (t > MAX_TIMEOUT_S) {
+                t = MAX_TIMEOUT_S;
+            }
+            ms = (int)(t * 1000.0);
+            if ((lua_Number)ms < t * 1000.0) {
+                ms++;
+            }
+            ctx->timeout_ms = ms;
+        }
+    }
+    lua_pushboolean(L, 1);
+    return 1;
 }
 
 static int handle_write(lua_State *L)
@@ -194,6 +259,7 @@ static luaL_Reg nlconn_funcs[] = {
 static luaL_Reg handle_funcs[] = {
     {"read", handle_read},
     {"write", handle_write},
+    {"settimeout", handle_settimeout},
     {"close", handle_close},
     {"fileno", handle_fileno},
     {"getfd", handle_fileno},
