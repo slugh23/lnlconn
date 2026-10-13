@@ -15,8 +15,8 @@ sudo cmake --install build
 ```
 
 The C module is installed to `lib/lua/<ver>/lnlconn.so` and the Lua modules to
-`share/lua/<ver>/` under the install prefix.  Opening a `NETLINK_CONNECTOR`
-socket and talking to `w1` generally requires root.
+`share/lua/<ver>/` under the install prefix.  The udev and modprobe files are
+not installed by CMake; see [System setup](#system-setup-for-w1).
 
 ## C module: `lnlconn`
 
@@ -149,6 +149,42 @@ roughly 37 ms per changed row plus the verifying reads.
 See `test/w1-test.lua` for building `W1_LIST_MASTERS` and `W1_CMD_SEARCH`
 requests by hand with the message modules, and `test/hdr-test.lua` /
 `test/skt-test.lua` for the header and socket helpers.
+
+## System setup for w1
+
+Two optional files in this repository configure the kernel side.  Neither is
+installed by CMake.
+
+**`udev/99-w1.rules`** lets members of a `w1` group use the 1-Wire sysfs
+attributes (bus master settings, device `eeprom` files) without root:
+
+```sh
+sudo groupadd --system w1
+sudo usermod -aG w1 $USER          # log out and back in afterwards
+sudo cp udev/99-w1.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger --subsystem-match=w1
+```
+
+The rule runs when a device is added, so unplug and replug an adapter to
+apply it to an existing master.  It does not affect the netlink connector.
+In testing on Ubuntu (kernel 7.0), searching, reading and writing over the
+connector worked without root, but your kernel may differ.
+
+**`modprobe.d/w1.conf`** turns off the kernel's periodic slave search
+(`search_count=0`), so devices are found by searching over the netlink
+connector instead, and drops a slave after one missed search (`slave_ttl=1`)
+if searching is ever re-enabled.  These are `wire` module parameters, read
+only when the module loads:
+
+```sh
+sudo cp modprobe.d/w1.conf /etc/modprobe.d/
+sudo modprobe -r w1_ds2431 ds2490 wire   # or reboot; then re-plug the adapter
+```
+
+With the search off, sysfs no longer lists devices on its own, and a device
+that has been removed stays listed until it expires.  Use the netlink search
+(`bridge:search()`) as the source of truth.  `w1_master_search` can still be
+changed per master at runtime (`-1` searches forever, `0` never).
 
 ## License
 
