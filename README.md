@@ -176,9 +176,9 @@ assert(dev:write_teds(new_teds))        -- checksums added again
   is too long, and writes through `write_memory`, so unchanged pages are not
   reprogrammed.  When the application register is locked, the payload must
   start with its 8 bytes, which are never written.
-- The DS2430A rule (register included in the checksum) follows the TEDS
-  convention described to us and has not been checked against a known-good
-  part.
+- On a DS2430A with a locked application register, the register is part of
+  the page checksum.  This was checked against a DS2430A holding valid TEDS:
+  byte 0 matched only when the register was included.
 
 `dev:app_register_locked()` and `dev:read_app_register()` read the DS2430A's
 status and one-time programmable register.  Reading returns an error while

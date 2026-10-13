@@ -351,6 +351,20 @@ do -- DS2430A with the register not locked: just the 32-byte page
   eq(sim.protected_touched, false, "register untouched")
 end
 
+do -- a real DS2430A holding valid TEDS: the register is part of the checksum
+  local app = "\x13\x00\xe2\xa4\xfd\x39\x30\x00"
+  local eeprom = "\x64\x64\x90\x0f\xb8\x05\x04\x29\x24\xe6\x10\xa1\xb5\xc5\x05\x7e"
+              .. "\x2c\xd3\x41\xf3\x31\xfa\x9e\x36\xd3\xf3\x00\x00\x00\x00\x00\x00"
+  local dev, sim = make_device(0x14, 32, {locked = true, app = app})
+  for i = 1, #eeprom do sim.mem[i - 1] = eeprom:byte(i) end
+  assert(checksum(eeprom:sub(2)) ~= eeprom:byte(1), "the register alone is not enough")
+  eq(checksum(app .. eeprom:sub(2)), eeprom:byte(1), "register plus eeprom matches byte 0")
+  local got, info = dev:read_teds()
+  eq(got, app .. eeprom:sub(2), "real part reads back"); eq(#got, 39, "39 bytes"); eq(info.application, true, "application")
+  sim.programmed = 0
+  assert(dev:write_teds(got)); eq(sim.programmed, 0, "rewriting valid TEDS programs nothing")
+end
+
 do -- families without TEDS support
   local dev = make_device(0x23, 512)
   local ok, err = dev:read_teds()
