@@ -112,6 +112,35 @@ end
 `device:cmd(bytes)` sends a pre-packed command to a device, and `device:read(n)`
 issues a `W1_CMD_READ` of `n` bytes.  Both return the list of reply messages.
 
+### Reading and writing EEPROM memory
+
+Devices found by `bridge:search()` have memory helpers for the DS2431 (family
+`0x2d`, 128 bytes, read/write) and DS2433 (family `0x23`, 512 bytes, read
+only).  They go straight to the device over netlink, so there is no sysfs path
+to look up.  Other families return `nil, "unsupported device family"`.
+
+```lua
+local data = dev:read_memory(0, 56)           -- addr, number of bytes
+local ok, err = dev:write_memory(0x10, "abc") -- any address and alignment
+```
+
+- `dev:read_memory(addr, n [, proof])` returns a string.  The DS2431's read
+  command has no CRC, so `proof=true` reads again until two reads agree, at
+  twice the cost.
+- `dev:write_memory(addr, data)` returns `true`.  It reads the affected 8-byte
+  rows, programs only the rows that change (scratchpad write, read-back,
+  copy, then an 11 ms wait), and verifies the result.  Writing the same data
+  does nothing.
+- Addresses outside the data memory are refused before anything is sent, so
+  the DS2431's permanent protection registers (`0x80` and up) can't be
+  reached.
+- On failure they return `nil, message [, status]`, where `status` is the
+  kernel's errno for the request.
+
+Approximate times on a DS9490R at standard speed: a 128-byte read is about
+72 ms (144 ms with `proof`), a 56-byte read about 35 ms, and a write takes
+roughly 37 ms per changed row plus the verifying reads.
+
 ### Low-level usage
 
 See `test/w1-test.lua` for building `W1_LIST_MASTERS` and `W1_CMD_SEARCH`
